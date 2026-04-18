@@ -6,13 +6,13 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:sans-serif;background:#fff9e0;overflow:hidden}
-#game{position:relative;height:100vh;overflow:hidden}
+#game{position:relative;height:100vh;overflow:hidden;display:flex;flex-direction:column}
 
 #topbar{display:none;justify-content:space-between;align-items:center;padding:12px 20px;font-weight:bold;font-size:18px;background:rgba(255,249,224,0.9);z-index:10;position:relative}
 #prompt{display:none;text-align:center;font-size:72px;font-weight:900;padding:10px 0 0;line-height:1}
 #timer{display:none;text-align:center;font-size:20px;color:#666;padding:4px 0}
 #feedback{text-align:center;font-size:22px;font-weight:bold;min-height:32px;padding:2px 0}
-#arena{display:none;position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+#arena{display:none;position:relative;width:700px;height:450px;margin:8px auto 0;border:4px solid #f5a623;border-radius:28px;background:rgba(255,255,255,0.6);overflow:hidden;box-shadow:0 6px 32px rgba(245,166,35,0.4),0 0 0 2px rgba(245,166,35,0.15),inset 0 0 40px rgba(245,166,35,0.08)}
 
 .kernel{
   position:absolute;
@@ -174,7 +174,7 @@ const CHEERS=[
   {word:"AWESOME!",color:"#d35400",emoji:"💥"}
 ];
 
-const MAX_LEVELS = 4;
+const MAX_LEVELS = 5;
 
 let level=1,score=0,combo=0,answer=0;
 let timeLeft=10,timerInterval=null;
@@ -182,7 +182,7 @@ let questionCount=0;
 const TOTAL_Q=6;
 
 // Speed per level: [minSpeed, maxSpeed] multiplier (levels 1–4)
-const SPEED=[null,[0.5,0.9],[0.9,1.4],[1.4,2.0],[2.8,3.8]];
+const SPEED=[null,[0.5,0.9],[0.9,1.4],[1.4,2.0],[1.6,2.2],[1.8,2.5]];
 
 // Track numbers used per level to avoid repeats
 let usedAnswers=[];
@@ -320,9 +320,12 @@ function newQuestion(){
     // ensure answer stays in teen range (≥11): pick n from 12–19
     const base=(n<12)?12:n;
     answer=base-1;setPrompt(`1 less than ${base}`);
-  }else{
+  }else if(level===4){
     // Level 4: 10 + something
     answer=n;setPrompt(`10 + ${n-10}`);
+  }else{
+    // Level 5: "Find 1 ten and X ones"
+    answer=n;setPrompt(`Find 1 ten and ${n-10} ones`);
   }
 
   renderKernels();
@@ -350,30 +353,15 @@ function startTimer(){
   },1000);
 }
 
-/* NON-OVERLAPPING PLACEMENT */
-function generatePositions(count, margin, topOffset, bottomPad, minDist) {
-  const W = window.innerWidth - margin * 2;
-  const H = window.innerHeight - topOffset - bottomPad;
-  const placed = [];
-  const maxAttempts = 500;
-
-  for (let i = 0; i < count; i++) {
-    let x, y, attempts = 0, ok = false;
-    while (attempts < maxAttempts) {
-      x = margin + Math.random() * W;
-      y = topOffset + Math.random() * H;
-      ok = placed.every(p => Math.hypot(p.x - x, p.y - y) >= minDist);
-      if (ok) break;
-      attempts++;
-    }
-    placed.push({ x, y });
-  }
-  return placed;
-}
+/* renderKernels handles placement internally */
 
 function renderKernels(){
   const arena=document.getElementById('arena');
   arena.innerHTML='';
+
+  const BOX_W = 700; // arena width
+  const BOX_H = 450; // arena height
+  const KSIZE = 90; // approximate kernel element size in px (emoji+number wider than 64)
 
   // Build distractor pool — all unique, answer included, no repeats
   const pool = [answer];
@@ -392,37 +380,44 @@ function renderKernels(){
     [pool[i], pool[j]] = [pool[j], pool[i]];
   }
 
-  const margin = 80;
-  const topOffset = 200;   // below prompt/timer area
-  const bottomPad = 100;
-  const minDist = 130;     // minimum px between kernel centres — prevents overlap
-
-  const positions = generatePositions(pool.length, margin, topOffset, bottomPad, minDist);
-  const [sMin, sMax] = SPEED[level];
+  // Place kernels without overlap inside 400px box
+  const placed = [];
+  const minDist = 100;
+  const maxAttempts = 400;
 
   pool.forEach((n, idx) => {
+    let px, py, attempts = 0;
+    do {
+      px = KSIZE/2 + Math.random() * (BOX_W - KSIZE);
+      py = KSIZE/2 + Math.random() * (BOX_H - KSIZE);
+      attempts++;
+    } while (
+      placed.some(p => Math.hypot(p.x - px, p.y - py) < minDist) &&
+      attempts < maxAttempts
+    );
+    placed.push({x: px, y: py});
+
     const d = document.createElement('div');
     d.className = 'kernel';
     d.textContent = '🍿' + n;
-
-    let px = positions[idx].x;
-    let py = positions[idx].y;
     d.style.left = px + 'px';
     d.style.top  = py + 'px';
     d.onclick = () => clickKernel(n, d);
     arena.appendChild(d);
 
+    const [sMin, sMax] = SPEED[level];
     const speed = sMin + Math.random() * (sMax - sMin);
     let dx = (Math.random() - .5) * 2 * speed;
     let dy = (Math.random() - .5) * 2 * speed;
     if (Math.abs(dx) < 0.2) dx = 0.2 * (Math.sign(dx) || 1);
     if (Math.abs(dy) < 0.2) dy = 0.2 * (Math.sign(dy) || 1);
 
-    // Keep bouncing within safe area so kernels don't drift onto each other's start zone
     const bounce = () => {
       px += dx; py += dy;
-      if (px < margin || px > window.innerWidth - margin) dx *= -1;
-      if (py < topOffset - 40 || py > window.innerHeight - bottomPad) dy *= -1;
+      if (px < 0) { px = 0; dx = Math.abs(dx); }
+      if (px > BOX_W - KSIZE) { px = BOX_W - KSIZE; dx = -Math.abs(dx); }
+      if (py < 0) { py = 0; dy = Math.abs(dy); }
+      if (py > BOX_H - KSIZE) { py = BOX_H - KSIZE; dy = -Math.abs(dy); }
       d.style.left = px + 'px';
       d.style.top  = py + 'px';
       kernelAnimFrames.push(requestAnimationFrame(bounce));
@@ -463,6 +458,12 @@ function clickKernel(n,el){
 function showLevelCheer(){
   clearInterval(timerInterval);
   kernelAnimFrames.forEach(cancelAnimationFrame);kernelAnimFrames=[];
+
+  // Skip cheer card on the final level — go straight to trophy
+  if(level >= MAX_LEVELS){
+    showTrophy();
+    return;
+  }
 
   const pick=CHEERS[Math.floor(Math.random()*CHEERS.length)];
   document.getElementById('cheerEmoji').textContent=pick.emoji;
